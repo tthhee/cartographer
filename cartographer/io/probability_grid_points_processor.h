@@ -23,10 +23,11 @@
 #include "cartographer/io/image.h"
 #include "cartographer/io/points_batch.h"
 #include "cartographer/io/points_processor.h"
+#include "cartographer/mapping/2d/probability_grid.h"
+#include "cartographer/mapping/2d/probability_grid_range_data_inserter_2d.h"
+#include "cartographer/mapping/proto/2d/probability_grid_range_data_inserter_options_2d.pb.h"
 #include "cartographer/mapping/proto/trajectory.pb.h"
-#include "cartographer/mapping_2d/probability_grid.h"
-#include "cartographer/mapping_2d/proto/range_data_inserter_options.pb.h"
-#include "cartographer/mapping_2d/range_data_inserter.h"
+#include "cartographer/mapping/value_conversion_tables.h"
 
 namespace cartographer {
 namespace io {
@@ -40,13 +41,14 @@ class ProbabilityGridPointsProcessor : public PointsProcessor {
   constexpr static const char* kConfigurationFileActionName =
       "write_probability_grid";
   enum class DrawTrajectories { kNo, kYes };
+  enum class OutputType { kPng, kPb };
   ProbabilityGridPointsProcessor(
       double resolution,
-      const mapping_2d::proto::RangeDataInserterOptions&
-          range_data_inserter_options,
-      const DrawTrajectories& draw_trajectories,
+      const mapping::proto::ProbabilityGridRangeDataInserterOptions2D&
+          probability_grid_range_data_inserter_options,
+      const DrawTrajectories& draw_trajectories, const OutputType& output_type,
       std::unique_ptr<FileWriter> file_writer,
-      const std::vector<mapping::proto::Trajectory>& trajectorios,
+      const std::vector<mapping::proto::Trajectory>& trajectories,
       PointsProcessor* next);
   ProbabilityGridPointsProcessor(const ProbabilityGridPointsProcessor&) =
       delete;
@@ -65,22 +67,24 @@ class ProbabilityGridPointsProcessor : public PointsProcessor {
 
  private:
   const DrawTrajectories draw_trajectories_;
+  const OutputType output_type_;
   const std::vector<mapping::proto::Trajectory> trajectories_;
   std::unique_ptr<FileWriter> file_writer_;
   PointsProcessor* const next_;
-  mapping_2d::RangeDataInserter range_data_inserter_;
-  mapping_2d::ProbabilityGrid probability_grid_;
+  mapping::ProbabilityGridRangeDataInserter2D range_data_inserter_;
+  mapping::ValueConversionTables conversion_tables_;
+  mapping::ProbabilityGrid probability_grid_;
 };
 
 // Draws 'probability_grid' into an image and fills in 'offset' with the cropped
 // map limits. Returns 'nullptr' if probability_grid was empty.
 std::unique_ptr<Image> DrawProbabilityGrid(
-    const mapping_2d::ProbabilityGrid& probability_grid,
-    Eigen::Array2i* offset);
+    const mapping::ProbabilityGrid& probability_grid, Eigen::Array2i* offset);
 
 // Create an initially empty probability grid with 'resolution' and a small
 // size, suitable for a PointsBatchProcessor.
-mapping_2d::ProbabilityGrid CreateProbabilityGrid(const double resolution);
+mapping::ProbabilityGrid CreateProbabilityGrid(
+    const double resolution, mapping::ValueConversionTables* conversion_tables);
 
 }  // namespace io
 }  // namespace cartographer

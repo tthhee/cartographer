@@ -21,7 +21,10 @@ Cartographer
    :hidden:
 
    configuration
+   evaluation
    terminology
+   cost_functions
+   pbstream_migration
 
 `Cartographer`_ is a system that provides real-time simultaneous localization
 and mapping (`SLAM`_) in 2D and 3D across multiple platforms and sensor
@@ -64,7 +67,7 @@ with the standalone library. Currently, it is the best available reference.
 
 On Ubuntu 14.04 (Trusty):
 
-.. literalinclude:: ../../scripts/install_debs.sh
+.. literalinclude:: ../../scripts/install_debs_cmake.sh
   :language: bash
   :lines: 20-
 
@@ -76,7 +79,7 @@ On Ubuntu 14.04 (Trusty):
   :language: bash
   :lines: 20-
 
-.. literalinclude:: ../../scripts/install_cartographer.sh
+.. literalinclude:: ../../scripts/install_cartographer_cmake.sh
   :language: bash
   :lines: 20-
 

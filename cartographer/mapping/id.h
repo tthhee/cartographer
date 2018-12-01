@@ -27,7 +27,7 @@
 #include <tuple>
 #include <vector>
 
-#include "cartographer/common/make_unique.h"
+#include "absl/memory/memory.h"
 #include "cartographer/common/port.h"
 #include "cartographer/common/time.h"
 #include "cartographer/mapping/proto/pose_graph.pb.h"
@@ -35,10 +35,29 @@
 
 namespace cartographer {
 namespace mapping {
+namespace internal {
+
+template <class T>
+auto GetTimeImpl(const T& t, int) -> decltype(t.time()) {
+  return t.time();
+}
+template <class T>
+auto GetTimeImpl(const T& t, unsigned) -> decltype(t.time) {
+  return t.time;
+}
+template <class T>
+common::Time GetTime(const T& t) {
+  return GetTimeImpl(t, 0);
+}
+
+}  // namespace internal
 
 // Uniquely identifies a trajectory node using a combination of a unique
 // trajectory ID and a zero-based index of the node inside that trajectory.
 struct NodeId {
+  NodeId(int trajectory_id, int node_index)
+      : trajectory_id(trajectory_id), node_index(node_index) {}
+
   int trajectory_id;
   int node_index;
 
@@ -67,6 +86,9 @@ inline std::ostream& operator<<(std::ostream& os, const NodeId& v) {
 // Uniquely identifies a submap using a combination of a unique trajectory ID
 // and a zero-based index of the submap inside that trajectory.
 struct SubmapId {
+  SubmapId(int trajectory_id, int submap_index)
+      : trajectory_id(trajectory_id), submap_index(submap_index) {}
+
   int trajectory_id;
   int submap_index;
 
@@ -159,7 +181,7 @@ class MapById {
     }
 
     std::unique_ptr<const IdDataReference> operator->() const {
-      return common::make_unique<const IdDataReference>(this->operator*());
+      return absl::make_unique<const IdDataReference>(this->operator*());
     }
 
     ConstIterator& operator++() {
@@ -273,7 +295,7 @@ class MapById {
   void Trim(const IdType& id) {
     auto& trajectory = trajectories_.at(id.trajectory_id);
     const auto it = trajectory.data_.find(GetIndex(id));
-    CHECK(it != trajectory.data_.end());
+    CHECK(it != trajectory.data_.end()) << id;
     if (std::next(it) == trajectory.data_.end()) {
       // We are removing the data with the highest index from this trajectory.
       // We assume that we will never append to it anymore. If we did, we would
@@ -315,6 +337,15 @@ class MapById {
                : 0;
   }
 
+  // Returns count of all elements.
+  size_t size() const {
+    size_t size = 0;
+    for (const auto& item : trajectories_) {
+      size += item.second.data_.size();
+    }
+    return size;
+  }
+
   // Returns Range object for range-based loops over the nodes of a trajectory.
   Range<ConstIterator> trajectory(const int trajectory_id) const {
     return Range<ConstIterator>(BeginOfTrajectory(trajectory_id),
@@ -347,7 +378,7 @@ class MapById {
 
     const std::map<int, DataType>& trajectory =
         trajectories_.at(trajectory_id).data_;
-    if (std::prev(trajectory.end())->second.time() < time) {
+    if (internal::GetTime(std::prev(trajectory.end())->second) < time) {
       return EndOfTrajectory(trajectory_id);
     }
     auto left = trajectory.begin();
@@ -355,7 +386,7 @@ class MapById {
     while (left != right) {
       const int middle = left->first + (right->first - left->first) / 2;
       const auto lower_bound_middle = trajectory.lower_bound(middle);
-      if (lower_bound_middle->second.time() < time) {
+      if (internal::GetTime(lower_bound_middle->second) < time) {
         left = std::next(lower_bound_middle);
       } else {
         right = lower_bound_middle;

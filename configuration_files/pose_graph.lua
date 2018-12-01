@@ -65,11 +65,15 @@ POSE_GRAPH = {
     huber_scale = 1e1,
     acceleration_weight = 1e3,
     rotation_weight = 3e5,
-    consecutive_node_translation_weight = 1e5,
-    consecutive_node_rotation_weight = 1e5,
+    local_slam_pose_translation_weight = 1e5,
+    local_slam_pose_rotation_weight = 1e5,
+    odometry_translation_weight = 1e5,
+    odometry_rotation_weight = 1e5,
     fixed_frame_pose_translation_weight = 1e1,
     fixed_frame_pose_rotation_weight = 1e2,
     log_solver_summary = false,
+    use_online_imu_extrinsics_in_3d = true,
+    fix_z_in_3d = false,
     ceres_solver_options = {
       use_nonmonotonic_steps = false,
       max_num_iterations = 50,
@@ -80,4 +84,9 @@ POSE_GRAPH = {
   global_sampling_ratio = 0.003,
   log_residual_histograms = true,
   global_constraint_search_after_n_seconds = 10.,
+  --  overlapping_submaps_trimmer_2d = {
+  --    fresh_submaps_count = 1,
+  --    min_covered_area = 2,
+  --    min_added_submaps_count = 5,
+  --  },
 }

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-cmake_minimum_required(VERSION 2.8.12)  # Ships with Ubuntu 14.04 (Trusty)
+cmake_minimum_required(VERSION 3.2)
 
 project(cartographer)
 
@@ -22,18 +22,23 @@ set(CARTOGRAPHER_PATCH_VERSION 0)
 set(CARTOGRAPHER_VERSION ${CARTOGRAPHER_MAJOR_VERSION}.${CARTOGRAPHER_MINOR_VERSION}.${CARTOGRAPHER_PATCH_VERSION})
 set(CARTOGRAPHER_SOVERSION ${CARTOGRAPHER_MAJOR_VERSION}.${CARTOGRAPHER_MINOR_VERSION})
 option(BUILD_GRPC "build Cartographer gRPC support" false)
-# TODO(gaschler): Make this an option.
-set(GRPC_PLUGIN_PATH "/usr/local/bin/grpc_cpp_plugin")
+set(CARTOGRAPHER_HAS_GRPC ${BUILD_GRPC})
+option(BUILD_PROMETHEUS "build Prometheus monitoring support" false)
 
 include("${PROJECT_SOURCE_DIR}/cmake/functions.cmake")
 google_initialize_cartographer_project()
 google_enable_testing()
 
+find_package(Abseil REQUIRED)
 find_package(Boost REQUIRED COMPONENTS iostreams)
-find_package(Ceres REQUIRED COMPONENTS SparseLinearAlgebraLibrary)
+find_package(Ceres REQUIRED COMPONENTS SuiteSparse)
 find_package(Eigen3 REQUIRED)
 find_package(LuaGoogle REQUIRED)
 find_package(Protobuf 3.0.0 REQUIRED)
+
+if (${BUILD_GRPC})
+  find_package(async_grpc REQUIRED)
+endif()
 
 include(FindPkgConfig)
 PKG_SEARCH_MODULE(CAIRO REQUIRED cairo>=1.12.16)
@@ -54,26 +59,52 @@ install(DIRECTORY configuration_files DESTINATION share/cartographer/)
 
 install(DIRECTORY cmake DESTINATION share/cartographer/)
 
-file(GLOB_RECURSE ALL_LIBRARY_HDRS "*.h")
-file(GLOB_RECURSE ALL_LIBRARY_SRCS "*.cc")
-file(GLOB_RECURSE ALL_TESTS "*_test.cc")
-file(GLOB_RECURSE ALL_EXECUTABLES "*_main.cc")
-list(REMOVE_ITEM ALL_LIBRARY_SRCS ${ALL_TESTS})
+file(GLOB_RECURSE ALL_LIBRARY_HDRS "cartographer/*.h")
+file(GLOB_RECURSE ALL_LIBRARY_SRCS "cartographer/*.cc")
+file(GLOB_RECURSE TEST_LIBRARY_HDRS "cartographer/fake_*.h" "cartographer/*test_helpers*.h" "cartographer/mock_*.h")
+file(GLOB_RECURSE TEST_LIBRARY_SRCS "cartographer/fake_*.cc" "cartographer/*test_helpers*.cc" "cartographer/mock_*.cc")
+file(GLOB_RECURSE ALL_TESTS "cartographer/*_test.cc")
+file(GLOB_RECURSE ALL_EXECUTABLES "cartographer/*_main.cc")
+
+# Remove dotfiles/-folders that could potentially pollute the build.
+file(GLOB_RECURSE ALL_DOTFILES ".*/*")
+if (ALL_DOTFILES)
+  list(REMOVE_ITEM ALL_LIBRARY_HDRS ${ALL_DOTFILES})
+  list(REMOVE_ITEM ALL_LIBRARY_SRCS ${ALL_DOTFILES})
+  list(REMOVE_ITEM TEST_LIBRARY_HDRS ${ALL_DOTFILES})
+  list(REMOVE_ITEM TEST_LIBRARY_SRCS ${ALL_DOTFILES})
+  list(REMOVE_ITEM ALL_TESTS ${ALL_DOTFILES})
+  list(REMOVE_ITEM ALL_EXECUTABLES ${ALL_DOTFILES})
+endif()
 list(REMOVE_ITEM ALL_LIBRARY_SRCS ${ALL_EXECUTABLES})
-file(GLOB_RECURSE ALL_GRPC_FILES "cartographer_grpc/*")
+list(REMOVE_ITEM ALL_LIBRARY_SRCS ${ALL_TESTS})
+list(REMOVE_ITEM ALL_LIBRARY_HDRS ${TEST_LIBRARY_HDRS})
+list(REMOVE_ITEM ALL_LIBRARY_SRCS ${TEST_LIBRARY_SRCS})
+file(GLOB_RECURSE ALL_GRPC_FILES "cartographer/cloud/*")
+file(GLOB_RECURSE ALL_PROMETHEUS_FILES "cartographer/cloud/metrics/prometheus/*")
+list(REMOVE_ITEM ALL_GRPC_FILES ${ALL_PROMETHEUS_FILES})
 if (NOT ${BUILD_GRPC})
   list(REMOVE_ITEM ALL_LIBRARY_HDRS ${ALL_GRPC_FILES})
   list(REMOVE_ITEM ALL_LIBRARY_SRCS ${ALL_GRPC_FILES})
+  list(REMOVE_ITEM TEST_LIBRARY_HDRS ${ALL_GRPC_FILES})
+  list(REMOVE_ITEM TEST_LIBRARY_SRCS ${ALL_GRPC_FILES})
   list(REMOVE_ITEM ALL_TESTS ${ALL_GRPC_FILES})
   list(REMOVE_ITEM ALL_EXECUTABLES ${ALL_GRPC_FILES})
 endif()
-set(INSTALL_SOURCE_HDRS ${ALL_LIBRARY_HDRS})
-file(GLOB_RECURSE INTERNAL_HDRS "cartographer/internal/*.h"
-  "cartographer_grpc/internal/*.h")
+if (NOT ${BUILD_PROMETHEUS})
+  list(REMOVE_ITEM ALL_LIBRARY_HDRS ${ALL_PROMETHEUS_FILES})
+  list(REMOVE_ITEM ALL_LIBRARY_SRCS ${ALL_PROMETHEUS_FILES})
+  list(REMOVE_ITEM TEST_LIBRARY_HDRS ${ALL_PROMETHEUS_FILES})
+  list(REMOVE_ITEM TEST_LIBRARY_SRCS ${ALL_PROMETHEUS_FILES})
+  list(REMOVE_ITEM ALL_TESTS ${ALL_PROMETHEUS_FILES})
+  list(REMOVE_ITEM ALL_EXECUTABLES ${ALL_PROMETHEUS_FILES})
+endif()
+set(INSTALL_SOURCE_HDRS ${ALL_LIBRARY_HDRS} ${TEST_LIBRARY_HDRS})
+file(GLOB_RECURSE INTERNAL_HDRS "cartographer/*/internal/*.h")
 list(REMOVE_ITEM INSTALL_SOURCE_HDRS ${INTERNAL_HDRS})
 
-file(GLOB_RECURSE ALL_PROTOS "*.proto")
-file(GLOB_RECURSE ALL_GRPC_SERVICES "*_service.proto")
+file(GLOB_RECURSE ALL_PROTOS "cartographer/*.proto")
+file(GLOB_RECURSE ALL_GRPC_SERVICES "cartographer/*_service.proto")
 list(REMOVE_ITEM ALL_PROTOS ALL_GRPC_SERVICES)
 if (NOT ${BUILD_GRPC})
   list(REMOVE_ITEM ALL_PROTOS ${ALL_GRPC_FILES})
@@ -115,20 +146,16 @@ if(${BUILD_GRPC})
 
     list(APPEND ALL_GRPC_SERVICE_SRCS "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.cc")
     list(APPEND ALL_GRPC_SERVICE_HDRS "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.h")
-    list(APPEND ALL_GRPC_SERVICE_SRCS "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.grpc.pb.cc")
-    list(APPEND ALL_GRPC_SERVICE_HDRS "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.grpc.pb.h")
 
     add_custom_command(
-      OUTPUT "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.grpc.pb.cc"
-             "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.grpc.pb.h"
+      OUTPUT "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.cc"
+             "${PROJECT_BINARY_DIR}/${DIR}/${FIL_WE}.pb.h"
       COMMAND  ${PROTOBUF_PROTOC_EXECUTABLE}
-      ARGS --grpc_out  ${PROJECT_BINARY_DIR}
-        --cpp_out  ${PROJECT_BINARY_DIR}
+      ARGS --cpp_out  ${PROJECT_BINARY_DIR}
         -I ${PROJECT_SOURCE_DIR}
-        --plugin=protoc-gen-grpc=${GRPC_PLUGIN_PATH}
         ${ABS_FIL}
       DEPENDS ${ABS_FIL}
-      COMMENT "Running C++ protocol buffer compiler with gRPC support on ${ABS_FIL}"
+      COMMENT "Running C++ protocol buffer compiler on ${ABS_FIL}"
       VERBATIM
     )
   endforeach()
@@ -154,24 +181,22 @@ google_binary(cartographer_compute_relations_metrics
     cartographer/ground_truth/compute_relations_metrics_main.cc
 )
 
+google_binary(cartographer_pbstream
+  SRCS
+  cartographer/io/pbstream_main.cc
+)
+
 if(${BUILD_GRPC})
   google_binary(cartographer_grpc_server
     SRCS
-      cartographer_grpc/map_builder_server_main.cc
+      cartographer/cloud/map_builder_server_main.cc
   )
-endif()
-
-foreach(ABS_FIL ${ALL_TESTS})
-  file(RELATIVE_PATH REL_FIL ${PROJECT_SOURCE_DIR} ${ABS_FIL})
-  get_filename_component(DIR ${REL_FIL} DIRECTORY)
-  get_filename_component(FIL_WE ${REL_FIL} NAME_WE)
-  # Replace slashes as required for CMP0037.
-  string(REPLACE "/" "." TEST_TARGET_NAME "${DIR}/${FIL_WE}")
-  google_test("${TEST_TARGET_NAME}" ${ABS_FIL})
-  if(${BUILD_GRPC})
-    target_link_libraries("${TEST_TARGET_NAME}" PUBLIC grpc++)
+  target_link_libraries(cartographer_grpc_server PUBLIC grpc++)
+  target_link_libraries(cartographer_grpc_server PUBLIC async_grpc)
+  if(${BUILD_PROMETHEUS})
+    target_link_libraries(cartographer_grpc_server PUBLIC prometheus-cpp)
   endif()
-endforeach()
+endif()
 
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
   "${EIGEN3_INCLUDE_DIR}")
@@ -201,10 +226,47 @@ target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
   ${PROTOBUF_INCLUDE_DIR})
 # TODO(hrapp): This should not explicitly list pthread and use
 # PROTOBUF_LIBRARIES, but that failed on first try.
-target_link_libraries(${PROJECT_NAME} PUBLIC ${PROTOBUF_LIBRARY} pthread)
+target_link_libraries(${PROJECT_NAME} PUBLIC ${PROTOBUF_LIBRARY} pthread standalone_absl)
 if(${BUILD_GRPC})
   target_link_libraries(${PROJECT_NAME} PUBLIC grpc++)
+  target_link_libraries(${PROJECT_NAME} PUBLIC async_grpc)
 endif()
+if(${BUILD_PROMETHEUS})
+  target_link_libraries(${PROJECT_NAME} PUBLIC prometheus-cpp)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC USE_PROMETHEUS=1)
+endif()
+
+set(TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${GOOG_CXX_FLAGS}")
+set_target_properties(${PROJECT_NAME} PROPERTIES
+  COMPILE_FLAGS ${TARGET_COMPILE_FLAGS})
+
+set(TEST_LIB
+  cartographer_test_library
+)
+add_library(${TEST_LIB} ${TEST_LIBRARY_HDRS} ${TEST_LIBRARY_SRCS})
+target_include_directories(${TEST_LIB} SYSTEM PRIVATE
+  "${GMOCK_INCLUDE_DIRS}")
+target_link_libraries(${TEST_LIB} PUBLIC ${GMOCK_LIBRARY})
+target_link_libraries(${TEST_LIB} PUBLIC ${PROJECT_NAME})
+set_target_properties(${TEST_LIB} PROPERTIES
+  COMPILE_FLAGS ${TARGET_COMPILE_FLAGS})
+
+foreach(ABS_FIL ${ALL_TESTS})
+  file(RELATIVE_PATH REL_FIL ${PROJECT_SOURCE_DIR} ${ABS_FIL})
+  get_filename_component(DIR ${REL_FIL} DIRECTORY)
+  get_filename_component(FIL_WE ${REL_FIL} NAME_WE)
+  # Replace slashes as required for CMP0037.
+  string(REPLACE "/" "." TEST_TARGET_NAME "${DIR}/${FIL_WE}")
+  google_test("${TEST_TARGET_NAME}" ${ABS_FIL})
+  if(${BUILD_GRPC})
+    target_link_libraries("${TEST_TARGET_NAME}" PUBLIC grpc++)
+    target_link_libraries("${TEST_TARGET_NAME}" PUBLIC async_grpc)
+  endif()
+  if(${BUILD_PROMETHEUS})
+    target_link_libraries("${TEST_TARGET_NAME}" PUBLIC prometheus-cpp)
+  endif()
+  target_link_libraries("${TEST_TARGET_NAME}" PUBLIC ${TEST_LIB})
+endforeach()
 
 # Add the binary directory first, so that port.h is included after it has
 # been generated.
@@ -213,15 +275,6 @@ target_include_directories(${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>
     $<INSTALL_INTERFACE:include>
 )
-
-# TODO(damonkohler): Create a testing library.
-target_include_directories(${PROJECT_NAME} SYSTEM PRIVATE
-  "${GMOCK_INCLUDE_DIRS}")
-target_link_libraries(${PROJECT_NAME} PUBLIC ${GMOCK_LIBRARY})
-
-set(TARGET_COMPILE_FLAGS "${TARGET_COMPILE_FLAGS} ${GOOG_CXX_FLAGS}")
-set_target_properties(${PROJECT_NAME} PROPERTIES
-  COMPILE_FLAGS ${TARGET_COMPILE_FLAGS})
 
 install(
   TARGETS ${PROJECT_NAME}

@@ -16,8 +16,8 @@
 
 #include "cartographer/io/outlier_removing_points_processor.h"
 
+#include "absl/memory/memory.h"
 #include "cartographer/common/lua_parameter_dictionary.h"
-#include "cartographer/common/make_unique.h"
 #include "glog/logging.h"
 
 namespace cartographer {
@@ -27,7 +27,7 @@ std::unique_ptr<OutlierRemovingPointsProcessor>
 OutlierRemovingPointsProcessor::FromDictionary(
     common::LuaParameterDictionary* const dictionary,
     PointsProcessor* const next) {
-  return common::make_unique<OutlierRemovingPointsProcessor>(
+  return absl::make_unique<OutlierRemovingPointsProcessor>(
       dictionary->GetDouble("voxel_size"), next);
 }
 
@@ -81,7 +81,8 @@ PointsProcessor::FlushResult OutlierRemovingPointsProcessor::Flush() {
 void OutlierRemovingPointsProcessor::ProcessInPhaseOne(
     const PointsBatch& batch) {
   for (size_t i = 0; i < batch.points.size(); ++i) {
-    ++voxels_.mutable_value(voxels_.GetCellIndex(batch.points[i]))->hits;
+    ++voxels_.mutable_value(voxels_.GetCellIndex(batch.points[i].position))
+          ->hits;
   }
 }
 
@@ -91,10 +92,10 @@ void OutlierRemovingPointsProcessor::ProcessInPhaseTwo(
   // by better ray casting, and also by marking the hits of the current range
   // data to be excluded.
   for (size_t i = 0; i < batch.points.size(); ++i) {
-    const Eigen::Vector3f delta = batch.points[i] - batch.origin;
+    const Eigen::Vector3f delta = batch.points[i].position - batch.origin;
     const float length = delta.norm();
     for (float x = 0; x < length; x += voxel_size_) {
-      const auto index =
+      const Eigen::Array3i index =
           voxels_.GetCellIndex(batch.origin + (x / length) * delta);
       if (voxels_.value(index).hits > 0) {
         ++voxels_.mutable_value(index)->rays;
@@ -106,9 +107,10 @@ void OutlierRemovingPointsProcessor::ProcessInPhaseTwo(
 void OutlierRemovingPointsProcessor::ProcessInPhaseThree(
     std::unique_ptr<PointsBatch> batch) {
   constexpr double kMissPerHitLimit = 3;
-  std::unordered_set<int> to_remove;
+  absl::flat_hash_set<int> to_remove;
   for (size_t i = 0; i < batch->points.size(); ++i) {
-    const auto voxel = voxels_.value(voxels_.GetCellIndex(batch->points[i]));
+    const VoxelData voxel =
+        voxels_.value(voxels_.GetCellIndex(batch->points[i].position));
     if (!(voxel.rays < kMissPerHitLimit * voxel.hits)) {
       to_remove.insert(i);
     }

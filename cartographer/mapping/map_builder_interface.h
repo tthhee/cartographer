@@ -17,14 +17,14 @@
 #ifndef CARTOGRAPHER_MAPPING_MAP_BUILDER_INTERFACE_H_
 #define CARTOGRAPHER_MAPPING_MAP_BUILDER_INTERFACE_H_
 
+#include <set>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include "Eigen/Geometry"
 #include "cartographer/common/lua_parameter_dictionary.h"
 #include "cartographer/common/port.h"
-#include "cartographer/io/proto_stream.h"
+#include "cartographer/io/proto_stream_interface.h"
 #include "cartographer/mapping/id.h"
 #include "cartographer/mapping/pose_graph_interface.h"
 #include "cartographer/mapping/proto/submap_visualization.pb.h"
@@ -42,6 +42,8 @@ class MapBuilderInterface {
   using LocalSlamResultCallback =
       TrajectoryBuilderInterface::LocalSlamResultCallback;
 
+  using SensorId = TrajectoryBuilderInterface::SensorId;
+
   MapBuilderInterface() {}
   virtual ~MapBuilderInterface() {}
 
@@ -50,13 +52,15 @@ class MapBuilderInterface {
 
   // Creates a new trajectory builder and returns its index.
   virtual int AddTrajectoryBuilder(
-      const std::unordered_set<std::string>& expected_sensor_ids,
+      const std::set<SensorId>& expected_sensor_ids,
       const proto::TrajectoryBuilderOptions& trajectory_options,
       LocalSlamResultCallback local_slam_result_callback) = 0;
 
   // Creates a new trajectory and returns its index. Querying the trajectory
   // builder for it will return 'nullptr'.
-  virtual int AddTrajectoryForDeserialization() = 0;
+  virtual int AddTrajectoryForDeserialization(
+      const proto::TrajectoryBuilderOptionsWithSensorIds&
+          options_with_sensor_ids_proto) = 0;
 
   // Returns the 'TrajectoryBuilderInterface' corresponding to the specified
   // 'trajectory_id' or 'nullptr' if the trajectory has no corresponding
@@ -73,15 +77,37 @@ class MapBuilderInterface {
   virtual std::string SubmapToProto(const SubmapId& submap_id,
                                     proto::SubmapQuery::Response* response) = 0;
 
-  // Serializes the current state to a proto stream.
-  virtual void SerializeState(io::ProtoStreamWriter* writer) = 0;
+  // Serializes the current state to a proto stream. If
+  // 'include_unfinished_submaps' is set to true, unfinished submaps, i.e.
+  // submaps that have not yet received all rangefinder data insertions, will
+  // be included in the serialized state.
+  virtual void SerializeState(bool include_unfinished_submaps,
+                              io::ProtoStreamWriterInterface* writer) = 0;
 
-  // Loads submaps from a proto stream into a new frozen trajectory.
-  virtual void LoadMap(io::ProtoStreamReader* reader) = 0;
+  // Serializes the current state to a proto stream file on the host system. If
+  // 'include_unfinished_submaps' is set to true, unfinished submaps, i.e.
+  // submaps that have not yet received all rangefinder data insertions, will
+  // be included in the serialized state.
+  // Returns true if the file was successfully written.
+  virtual bool SerializeStateToFile(bool include_unfinished_submaps,
+                                    const std::string& filename) = 0;
+
+  // Loads the SLAM state from a proto stream. Returns the remapping of new
+  // trajectory_ids.
+  virtual std::map<int /* trajectory id in proto */, int /* trajectory id */>
+  LoadState(io::ProtoStreamReaderInterface* reader, bool load_frozen_state) = 0;
+
+  // Loads the SLAM state from a pbstream file. Returns the remapping of new
+  // trajectory_ids.
+  virtual std::map<int /* trajectory id in proto */, int /* trajectory id */>
+  LoadStateFromFile(const std::string& filename, bool load_frozen_state) = 0;
 
   virtual int num_trajectory_builders() const = 0;
 
   virtual mapping::PoseGraphInterface* pose_graph() = 0;
+
+  virtual const std::vector<proto::TrajectoryBuilderOptionsWithSensorIds>&
+  GetAllTrajectoryBuilderOptions() const = 0;
 };
 
 }  // namespace mapping
